@@ -1,6 +1,22 @@
-import '@/styles/globals.css'
-import type { AppProps } from 'next/app'
+// src/pages/_app.tsx
+import "../styles/globals.css";
+import type { AppType } from "next/app";
+import NoSSR from "react-no-ssr";
+import { Toaster } from "react-hot-toast";
+import { Layout } from "../components/layout";
+import { WalletProvider } from "../use-wallet";
+import "@fontsource/roboto-mono/400.css";
+import { storage } from "../utils/storage";
 
-export default function App({ Component, pageProps }: AppProps) {
-  return <Component {...pageProps} />
-}
+const MyApp: AppType<{ address?: string }> = ({ Component, pageProps }) => (
+  <NoSSR>
+    <WalletProvider address={storage.getAddress()}>
+      <Layout>
+        <Toaster />
+        <Component {...pageProps} />
+      </Layout>
+    </WalletProvider>
+  </NoSSR>
+);
+
+export default MyApp;

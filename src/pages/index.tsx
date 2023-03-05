@@ -1,123 +1,198 @@
-import Head from 'next/head'
-import Image from 'next/image'
-import { Inter } from 'next/font/google'
-import styles from '@/styles/Home.module.css'
+/* eslint-disable @next/next/no-sync-scripts */
+import type { NextPage } from "next";
+import Head from "next/head";
+import { useForm } from "react-hook-form";
+import { toast } from "react-hot-toast";
+import { createClient, gql } from "@urql/core";
+import { useWallet } from "../use-wallet";
+import { Button } from "../components/button";
+import { useState } from "react";
 
-const inter = Inter({ subsets: ['latin'] })
+const ISSUER_V2_CONTRACT = "KT1BJC12dG17CVvPKJ1VYaNnaT5mzfnUTwXv";
 
-export default function Home() {
+const fxhash = createClient({
+  url: "https://api.fxhash.xyz/graphql",
+});
+
+export const fetchProject = async (id: number) => {
+  const { data } = await fxhash
+    .query(
+      gql`
+        query ProjectQuery($id: Float!) {
+          generativeToken(id: $id) {
+            id
+            pricingFixed {
+              price
+            }
+            pricingDutchAuction {
+              restingPrice
+            }
+          }
+        }
+      `,
+      {
+        id,
+      }
+    )
+    .toPromise();
+
+  if (!data) throw new Error("couldn't fetch project");
+  return data.generativeToken;
+};
+
+const AutoMintForm = () => {
+  const [mintingState, setMintingState] = useState<{
+    minting: boolean;
+    currentIteration?: number;
+    level?: number;
+  }>({
+    minting: false,
+  });
+  const { getContract, setSigner } = useWallet();
+
+  const {
+    register,
+    handleSubmit,
+    watch,
+    formState: { errors, isSubmitting },
+    reset,
+  } = useForm({
+    defaultValues: {
+      projectId: null,
+      useReserve: false,
+      iterations: 10,
+      interval: 1,
+      privateKey: "",
+    },
+  });
+
+  const onSubmit = async ({
+    projectId,
+    useReserve,
+    iterations,
+    privateKey,
+  }: any) => {
+    setSigner(privateKey);
+    const project = await fetchProject(parseInt(projectId));
+    const contract = await getContract(ISSUER_V2_CONTRACT);
+
+    // currently only support dutch auctions at resting price
+    const price =
+      project.pricingFixed?.price || project.pricingDutchAuction.restingPrice;
+
+    const mint = async (i: number) => {
+      const head = await fetch("https://api.tzkt.io/v1/head");
+      const { level } = await head.json();
+
+      if (level === mintingState.level) {
+        toast.custom("waiting for level to change...");
+        setTimeout(() => mint(i), 15 * 1000);
+      }
+
+      setMintingState({ minting: true, currentIteration: i, level });
+
+      try {
+        await contract.methodsObject
+          .mint({
+            issuer_id: projectId,
+            referrer: null,
+            reserve_input: useReserve ? "05070703060000" : null,
+          })
+          .send({
+            amount: price,
+            mutez: true,
+            storageLimit: 650,
+          });
+        toast.success(`minted ${i + 1} of ${iterations}`);
+
+        if (i + 1 === parseInt(iterations)) {
+          setMintingState({ minting: false });
+          reset();
+          return;
+        }
+
+        setTimeout(() => mint(i + 1), 15 * 1000);
+      } catch (e) {
+        toast.error("An error occurred - please try again");
+        setMintingState({ minting: false });
+      }
+    };
+
+    mint(0);
+  };
+
+  return (
+    <>
+      <label className="text-md font-body leading-6 text-gray-900 mt-8 mr-4">
+        project id
+      </label>
+      <input
+        type="text"
+        className="font-body text-sm mt-4 p-2 border border-gray-300 rounded-md shadow-sm focus:ring-[#EB664F] focus:border-[#EB664F]"
+        {...register("projectId", { required: true, maxLength: 1000 })}
+        aria-invalid={errors.projectId ? "true" : "false"}
+      />
+      <div className="mt-4" />
+      <label className="text-md font-body leading-6 text-gray-900 mt-8 mr-4">
+        use reserve?
+      </label>
+      <input
+        type="checkbox"
+        className="font-body text-sm mt-4 p-2 border border-gray-300 rounded-md shadow-sm focus:ring-[#EB664F] focus:border-[#EB664F]"
+        {...register("useReserve", { required: false })}
+        aria-invalid={errors.useReserve ? "true" : "false"}
+      />
+      <div className="mt-4" />
+      <label className="text-md font-body leading-6 text-gray-900 mt-8 mr-4">
+        number of iterations to mint
+      </label>
+      <input
+        type="text"
+        className="font-body text-sm mt-4 p-2 border border-gray-300 rounded-md shadow-sm focus:ring-[#EB664F] focus:border-[#EB664F]"
+        {...register("iterations", { required: true, maxLength: 1000 })}
+        aria-invalid={errors.iterations ? "true" : "false"}
+      />
+      <div className="mt-4" />
+      <label className="text-md font-body leading-6 text-gray-900 mt-8 mr-4">
+        private key
+      </label>
+      <input
+        type="text"
+        className="font-body text-sm mt-4 p-2 border border-gray-300 rounded-md shadow-sm focus:ring-[#EB664F] focus:border-[#EB664F]"
+        {...register("privateKey", { required: true, maxLength: 1000 })}
+        aria-invalid={errors.privateKey ? "true" : "false"}
+      />
+
+      <Button
+        disabled={mintingState.minting}
+        className="mt-8"
+        onClick={handleSubmit(onSubmit)}
+      >
+        {mintingState.currentIteration !== undefined
+          ? `minting ${mintingState.currentIteration + 1} of ${watch(
+              "iterations"
+            )} at level ${mintingState.level}`
+          : "automint"}
+      </Button>
+    </>
+  );
+};
+
+const Home: NextPage = () => {
   return (
     <>
       <Head>
-        <title>Create Next App</title>
-        <meta name="description" content="Generated by create next app" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>autominter</title>
+        <meta
+          name="description"
+          content="a tool for artists to automint fxhash tokens"
+        />
         <link rel="icon" href="/favicon.ico" />
+        <script src="https://cdn.tailwindcss.com"></script>
       </Head>
-      <main className={styles.main}>
-        <div className={styles.description}>
-          <p>
-            Get started by editing&nbsp;
-            <code className={styles.code}>src/pages/index.tsx</code>
-          </p>
-          <div>
-            <a
-              href="https://vercel.com?utm_source=create-next-app&utm_medium=default-template&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              By{' '}
-              <Image
-                src="/vercel.svg"
-                alt="Vercel Logo"
-                className={styles.vercelLogo}
-                width={100}
-                height={24}
-                priority
-              />
-            </a>
-          </div>
-        </div>
-
-        <div className={styles.center}>
-          <Image
-            className={styles.logo}
-            src="/next.svg"
-            alt="Next.js Logo"
-            width={180}
-            height={37}
-            priority
-          />
-          <div className={styles.thirteen}>
-            <Image
-              src="/thirteen.svg"
-              alt="13"
-              width={40}
-              height={31}
-              priority
-            />
-          </div>
-        </div>
-
-        <div className={styles.grid}>
-          <a
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=default-template&utm_campaign=create-next-app"
-            className={styles.card}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <h2 className={inter.className}>
-              Docs <span>-&gt;</span>
-            </h2>
-            <p className={inter.className}>
-              Find in-depth information about Next.js features and&nbsp;API.
-            </p>
-          </a>
-
-          <a
-            href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=default-template&utm_campaign=create-next-app"
-            className={styles.card}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <h2 className={inter.className}>
-              Learn <span>-&gt;</span>
-            </h2>
-            <p className={inter.className}>
-              Learn about Next.js in an interactive course with&nbsp;quizzes!
-            </p>
-          </a>
-
-          <a
-            href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=default-template&utm_campaign=create-next-app"
-            className={styles.card}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <h2 className={inter.className}>
-              Templates <span>-&gt;</span>
-            </h2>
-            <p className={inter.className}>
-              Discover and deploy boilerplate example Next.js&nbsp;projects.
-            </p>
-          </a>
-
-          <a
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=default-template&utm_campaign=create-next-app"
-            className={styles.card}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <h2 className={inter.className}>
-              Deploy <span>-&gt;</span>
-            </h2>
-            <p className={inter.className}>
-              Instantly deploy your Next.js site to a shareable URL
-              with&nbsp;Vercel.
-            </p>
-          </a>
-        </div>
-      </main>
+      <AutoMintForm />
     </>
-  )
-}
+  );
+};
+
+export default Home;

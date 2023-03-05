@@ -77,8 +77,9 @@ const AutoMintForm = () => {
     const contract = await getContract(ISSUER_V2_CONTRACT);
 
     // currently only support dutch auctions at resting price
-    const price =
-      project.pricingFixed?.price || project.pricingDutchAuction.restingPrice;
+    const price = project.pricingFixed
+      ? project.pricingFixed.price
+      : project.pricingDutchAuction.restingPrice;
 
     const mint = async (i: number) => {
       const head = await fetch("https://api.tzkt.io/v1/head");
